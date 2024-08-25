@@ -29,36 +29,65 @@ const LUT_3 = [_]u8{
     143, 14,  193, 128,
 };
 
-//TODO support over generic unsigned integers
-//ex:
-//fn max(comptime T: type, a: T, b: T) T {
-//switch (@typeInfo(T)) {
-//    .Float => {}, // all floats are ok
-//    .Int => |info| {
-//        if (info.bits < 1) {
-//            @compileError("You cannot have a max for type with fewer than 1 bit: " ++ @typeName(T));
-//            unreachable;
-//        }
-//    },
-//    else => {
-//        @compileError("You cannot have a max for type: " ++ @typeName(T));
-//        unreachable;
-//    },
-//}
+//pub const Int = struct {
+//    signedness: Signedness,
+//    bits: u16,
+//};
+//create a struct with log2(bits of input type 2 and unsigndness) and return
+//support u4, u8, u16, u32, u64, u128, u256, etc.
+const builtin = @import("builtin");
+fn validateInteger(comptime T: type) !builtin.Int {
+    switch (@typeInfo(T)) {
+        .Int => |info| {
+            switch (info.signedness) {
+                .signed => {
+                    @compileError("Type for hilbert computation must be an unsigned integer, type provided: " ++ @typeName(T));
+                },
+                else => {
+                    return .{};
+                },
+            }
+        },
+        else => {
+            @compileError("Type for hilbert computation must be an unsigned integer, type provided: " ++ @typeName(T));
+        },
+    }
+}
 
-pub fn toHilbert(x: usize, y: usize, order: u8) usize {
+test "validateInteger" {
+    try validateInteger(u32);
+}
+
+test "toHilbert sizing" {
+    const std = @import("std");
+    const print = std.debug.print;
+    const x: u8 = 14;
+    const y: u8 = 4;
+    const order: u8 = 5;
+
+    const result = toHilbert(x, y, order);
+    try std.testing.expect(result == 100);
+    print(" hilbert {d}\n", .{result});
+}
+
+pub fn toHilbert(x: anytype, y: anytype, order: u8) usize {
+    if (@TypeOf(x) != @TypeOf(y)) {
+        @compileError("Type of x and y must match, x provided: " ++ @typeName(@TypeOf(x)) ++ " y provided: " ++ @typeName(@TypeOf(y)));
+    }
+    try validateInteger(@TypeOf(x));
+
     var result: usize = 0;
     var state: u8 = 0;
 
     const coor_bits: u8 = @sizeOf(usize) << 3;
-    const one: u8 = 1;
-    const useless_bits: u8 = @clz(x | y) & ~one;
+    const useless_bits: u8 = @clz(x | y) & ~@as(u8, 1);
     const lowest_order = (coor_bits - useless_bits) + (order & 1);
 
     var shift_factor: i8 = @intCast(lowest_order);
     shift_factor -= 3;
 
     while (shift_factor > 0) : (shift_factor -= 3) {
+        // need to calculate the size of these for generic and return type from validateInteger
         const i6_shift_factor: i6 = @truncate(shift_factor);
         const u6_shift_factor: u6 = @bitCast(i6_shift_factor);
 
@@ -90,8 +119,7 @@ pub fn toHilbert(x: usize, y: usize, order: u8) usize {
 
 pub fn fromHilbert(hilbert_index: usize, order: u8) struct { x: usize, y: usize } {
     const coor_bits: u8 = @sizeOf(usize) << 3;
-    const one: u8 = 1;
-    const useless_bits: u8 = (@clz(hilbert_index)) & ~one;
+    const useless_bits: u8 = (@clz(hilbert_index)) & ~@as(u8, 1);
     const lowest_order: u8 = (coor_bits - useless_bits) + (order & 1);
 
     var state: u8 = 0;
