@@ -29,6 +29,23 @@ const LUT_3 = [_]u8{
     143, 14,  193, 128,
 };
 
+//TODO support over generic unsigned integers
+//ex:
+//fn max(comptime T: type, a: T, b: T) T {
+//switch (@typeInfo(T)) {
+//    .Float => {}, // all floats are ok
+//    .Int => |info| {
+//        if (info.bits < 1) {
+//            @compileError("You cannot have a max for type with fewer than 1 bit: " ++ @typeName(T));
+//            unreachable;
+//        }
+//    },
+//    else => {
+//        @compileError("You cannot have a max for type: " ++ @typeName(T));
+//        unreachable;
+//    },
+//}
+
 pub fn toHilbert(x: usize, y: usize, order: u8) usize {
     var result: usize = 0;
     var state: u8 = 0;
@@ -56,7 +73,7 @@ pub fn toHilbert(x: usize, y: usize, order: u8) usize {
         result |= (hhh << (u6_shift_factor << 1));
     }
 
-    shift_factor *= -1;
+    shift_factor = -(shift_factor);
     const i6_shift_factor: i6 = @truncate(shift_factor);
     const u6_shift_factor: u6 = @bitCast(i6_shift_factor);
 
@@ -103,7 +120,7 @@ pub fn fromHilbert(hilbert_index: usize, order: u8) struct { x: usize, y: usize 
         x_result |= (xxx << u6_shift_factor);
         y_result |= (yyy << u6_shift_factor);
     }
-    shift_factor *= -1;
+    shift_factor = -(shift_factor);
 
     const i6_shift_factor: i6 = @truncate(shift_factor);
     const u6_shift_factor: u6 = @bitCast(i6_shift_factor);
@@ -130,8 +147,9 @@ test "fromHilbert" {
     const hil_index: usize = 100;
     const order: u8 = 5;
 
-    const res = fromHilbert(hil_index, order);
-    print("x {d}, y {d}\n", .{ res.x, res.y });
+    const result = fromHilbert(hil_index, order);
+    try std.testing.expect((result.x == 14) and (result.y == 4));
+    print("x {d}, y {d}\n", .{ result.x, result.y });
 }
 
 test "toHilbert" {
@@ -142,5 +160,26 @@ test "toHilbert" {
     const order: u8 = 5;
 
     const result = toHilbert(x, y, order);
-    print("hilbert {d}\n", .{result});
+    try std.testing.expect(result == 100);
+    print(" hilbert {d}\n", .{result});
+}
+
+test "fast hilbert benchmark" {
+    const std = @import("std");
+    const print = std.debug.print;
+    const allocator = std.testing.allocator;
+
+    var hilb = try allocator.alloc(usize, 256 * 256);
+    defer allocator.free(hilb);
+
+    const start = std.time.microTimestamp();
+    for (0..256) |y| {
+        for (0..256) |x| {
+            const vec_index: usize = ((y * 256) + x);
+            hilb[vec_index] = toHilbert(x, y, 8);
+        }
+    }
+    const end = std.time.microTimestamp();
+
+    print(" time to comlete: {d}\n", .{end - start});
 }
