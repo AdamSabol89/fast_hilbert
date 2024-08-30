@@ -35,8 +35,9 @@ const LUT_3 = [_]u8{
 //};
 //create a struct with log2(bits of input type 2 and unsigndness) and return
 //support u4, u8, u16, u32, u64, u128, u256, etc.
-const builtin = @import("builtin");
-fn validateInteger(comptime T: type) !builtin.Int {
+const builtin = @import("std").builtin;
+
+fn constructIntTypes(comptime T: type) !struct { unsigned: type, signed: type } {
     switch (@typeInfo(T)) {
         .Int => |info| {
             switch (info.signedness) {
@@ -44,7 +45,16 @@ fn validateInteger(comptime T: type) !builtin.Int {
                     @compileError("Type for hilbert computation must be an unsigned integer, type provided: " ++ @typeName(T));
                 },
                 else => {
-                    return .{};
+                    return .{
+                        .unsigned = @Type(builtin.Type{ .Int = .{
+                            .signedness = builtin.Signedness.unsigned,
+                            .bits = @intFromFloat(@log2(@as(f64, info.bits))),
+                        } }),
+                        .signed = @Type(builtin.Type{ .Int = .{
+                            .signedness = builtin.Signedness.signed,
+                            .bits = @intFromFloat(@log2(@as(f64, info.bits))),
+                        } }),
+                    };
                 },
             }
         },
@@ -54,65 +64,50 @@ fn validateInteger(comptime T: type) !builtin.Int {
     }
 }
 
-test "validateInteger" {
-    try validateInteger(u32);
-}
-
-test "toHilbert sizing" {
-    const std = @import("std");
-    const print = std.debug.print;
-    const x: u8 = 14;
-    const y: u8 = 4;
-    const order: u8 = 5;
-
-    const result = toHilbert(x, y, order);
-    try std.testing.expect(result == 100);
-    print(" hilbert {d}\n", .{result});
-}
-
-pub fn toHilbert(x: anytype, y: anytype, order: u8) usize {
+pub fn toHilbert(x: anytype, y: anytype, order: u8) @TypeOf(x) {
     if (@TypeOf(x) != @TypeOf(y)) {
         @compileError("Type of x and y must match, x provided: " ++ @typeName(@TypeOf(x)) ++ " y provided: " ++ @typeName(@TypeOf(y)));
     }
-    try validateInteger(@TypeOf(x));
+    const shift_types = try constructIntTypes(@TypeOf(x));
+    const itype = shift_types.signed;
+    const utype = shift_types.unsigned;
 
-    var result: usize = 0;
+    var result: @TypeOf(x) = 0;
     var state: u8 = 0;
 
-    const coor_bits: u8 = @sizeOf(usize) << 3;
-    const useless_bits: u8 = @clz(x | y) & ~@as(u8, 1);
+    const coor_bits: usize = @sizeOf(@TypeOf(x)) << 3;
+    const useless_bits: usize = @clz(x | y) & ~@as(u8, 1);
     const lowest_order = (coor_bits - useless_bits) + (order & 1);
 
-    var shift_factor: i8 = @intCast(lowest_order);
+    var shift_factor: isize = @intCast(lowest_order);
     shift_factor -= 3;
 
     while (shift_factor > 0) : (shift_factor -= 3) {
         // need to calculate the size of these for generic and return type from validateInteger
-        const i6_shift_factor: i6 = @truncate(shift_factor);
-        const u6_shift_factor: u6 = @bitCast(i6_shift_factor);
+        const i6_shift_factor: itype = @truncate(shift_factor);
+        const u6_shift_factor: utype = @bitCast(i6_shift_factor);
 
-        const x_in = (x >> u6_shift_factor & 7) << 3;
-        const y_in = (y >> u6_shift_factor & 7);
+        const x_in: usize = @truncate((x >> u6_shift_factor & 7) << 3);
+        const y_in: usize = @truncate((y >> u6_shift_factor & 7));
 
         var r = LUT_3[x_in | y_in | state];
         state = r & 0b11000000;
-        r = r & 63;
+        r &= 63;
 
-        const hhh: usize = @intCast(r);
+        const hhh: @TypeOf(x) = @intCast(r);
         result |= (hhh << (u6_shift_factor << 1));
     }
 
     shift_factor = -(shift_factor);
-    const i6_shift_factor: i6 = @truncate(shift_factor);
-    const u6_shift_factor: u6 = @bitCast(i6_shift_factor);
+    const i6_shift_factor: itype = @truncate(shift_factor);
+    const u6_shift_factor: utype = @bitCast(i6_shift_factor);
 
-    const x_in = ((x << u6_shift_factor) & 7) << 3;
-    const y_in = (y << u6_shift_factor) & 7;
+    const x_in: usize = @truncate(((x << u6_shift_factor) & 7) << 3);
+    const y_in: usize = @truncate((y << u6_shift_factor) & 7);
 
-    var r = LUT_3[x_in | y_in | state];
-    r = r & 63;
+    const r = LUT_3[x_in | y_in | state] & 63;
 
-    var hhh: usize = @intCast(r);
+    var hhh: @TypeOf(x) = @intCast(r);
     hhh >>= @intCast(u6_shift_factor << 1);
     return result | hhh;
 }
@@ -210,4 +205,25 @@ test "fast hilbert benchmark" {
     const end = std.time.microTimestamp();
 
     print(" time to comlete: {d}\n", .{end - start});
+}
+
+test "constuct int types" {
+    const std = @import("std");
+
+    const res = try constructIntTypes(u32);
+    const unsigned = res.unsigned;
+    const signed = res.signed;
+
+    try std.testing.expect(std.mem.eql(u8, @typeName(unsigned), "u5"));
+    try std.testing.expect(std.mem.eql(u8, @typeName(signed), "i5"));
+}
+
+test "toHilbert sizing" {
+    const std = @import("std");
+    const x: u512 = 14;
+    const y: u512 = 4;
+    const order: u8 = 5;
+
+    const result = toHilbert(x, y, order);
+    try std.testing.expect(result == 100);
 }
